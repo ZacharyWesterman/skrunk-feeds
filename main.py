@@ -2,8 +2,11 @@
 from skrunk_api import Session, SessionError
 import json, re
 from typing import Generator, TypedDict
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
+import time
+
+FETCH_DELAY = 3600 #How many seconds to wait before fetching new documents
 
 #APIs
 import praw
@@ -58,9 +61,6 @@ def fetch_next_document(feed: Feed, api: Session) -> Generator[Document, None, N
 		log(f'ERROR: Invalid feed kind "{feed["kind"]}" in feed {feed["id"]}!')
 		return
 
-	#Get the url for the next item in the feed
-
-	# post = API.reddit.submission(url = feed['url'])
 	#Try to determine what website the feed URL links to so we can use the correct API
 	hostname = urlparse(feed['url']).hostname
 	addr = hostname.split('.')
@@ -128,6 +128,7 @@ def fetch_next_document(feed: Feed, api: Session) -> Generator[Document, None, N
 		document['title'] = post.title
 		document['body'] = post.selftext
 		document['author'] = post.author.name
+		document['posted'] = datetime.fromtimestamp(post.created_utc, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 	else:
 		log(f'ERROR: Cannot determine origin of feed {feed["id"]}')
 		return
@@ -147,6 +148,14 @@ def fetch_next_document(feed: Feed, api: Session) -> Generator[Document, None, N
 		else:
 			#We're creating a new document
 			result = api.call('createFeedDocument', document)
+
+			if feed['notify']:
+				api.call('sendNotification', {
+					'username': feed['creator'],
+					'title': feed['name'],
+					'body': 'A new post has been added to your feed.',
+					'category': 'feed',
+				})
 	except SessionError as e:
 		log(f'SKRUNK: {e}')
 		return
@@ -170,13 +179,14 @@ def main() -> None:
 	API.reddit = praw.Reddit(config['reddit']['username'], check_for_async = False)
 
 	log('Done.')
+	while True:
+		for feed in get_feeds(api):
+			try:
+				fetch_next_document(feed, api)
+			except Exception as e:
+				log(f'EXCEPTION: {e}')
 
-	for feed in get_feeds(api):
-		try:
-			fetch_next_document(feed, api)
-		except Exception as e:
-			log(f'EXCEPTION: {e}')
-
+		time.sleep(FETCH_DELAY)
 
 if __name__ == '__main__':
 	main()
