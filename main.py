@@ -51,7 +51,7 @@ def get_feeds(api: Session) -> Generator[Feed, None, None]:
 				'count': feed_batch_size,
 			})
 
-			for feed in feed_list:
+			for feed in [ i for i in feed_list if not i['inactive'] ]:
 				yield feed
 		except SessionError as e:
 			log(f'SKRUNK: {e}')
