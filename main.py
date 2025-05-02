@@ -101,7 +101,7 @@ def fetch_next_document(feed: Feed, api: Session) -> Generator[Document, None, N
 			next_url = doc['url']
 
 			#Search for (next)[...]
-			m = re.search(r'\[[Nn]ext\]\(([^)]*)\)', doc['body'])
+			m = re.search(r'\[[Nn]ext[^\w\]]*\]\(([^)]*)\)', doc['body'])
 			if m is not None:
 				#If pattern was found, fetch the next URL
 				next_url = m.group(1)
