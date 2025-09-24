@@ -16,6 +16,9 @@ from skrunk_api import Session, SessionError
 ## The number of seconds to wait before fetching new documents
 FETCH_DELAY = 3600
 
+## The number of seconds to wait between API calls to avoid rate limiting
+API_DELAY = 1
+
 
 class Feed(TypedDict, total=True):
     """
@@ -73,7 +76,7 @@ class API:
     API class that encapsulates a various API clients.
 
     Attributes:
-        reddit (praw.Reddit): An instance of the PRAW Reddit client 
+        reddit (praw.Reddit): An instance of the PRAW Reddit client
             used to interact with the Reddit API.
     """
     reddit: praw.Reddit
@@ -125,7 +128,7 @@ def get_feeds(api: Session) -> Generator[Feed, None, None]:
             log(f'SKRUNK: {e}')
 
 
-def fetch_next_document(feed: Feed, api: Session) -> None:
+def fetch_next_document(feed: Feed, api: Session) -> bool:
     """
     Fetches the next document for a given feed and updates or creates a feed document accordingly.
 
@@ -139,30 +142,31 @@ def fetch_next_document(feed: Feed, api: Session) -> None:
         api (Session): The API session object used to interact with the backend and external APIs.
 
     Returns:
-        None
+        bool: True if a new document was created or an existing document was updated,
+            False otherwise.
     """
 
     if feed['kind'] not in ['markdown_recursive']:
         log(f'ERROR: Invalid feed kind "{feed["kind"]}" in feed {feed["id"]}!')
-        return
+        return False
 
     # Try to determine what website the feed URL links to so we can use the correct API
     hostname = urlparse(feed['url']).hostname
     if hostname is None:
         log(f'ERROR: Feed {feed["id"]} has invalid URL "{feed["url"]}"')
-        return
+        return False
 
     addr = hostname.split('.')
     if len(addr) < 1:
         log(f'ERROR: Feed {feed["id"]} has invalid hostname "{hostname}"')
-        return
+        return False
 
     if addr[-2::] == ['reddit', 'com']:
         # We know API is reddit.
         feed['origin'] = 'reddit'
     else:
         log(f'ERROR: Could not determine origin for feed {feed["id"]} hostname "{hostname}"')
-        return
+        return False
 
     next_url = feed['url']
     document_body = None
@@ -183,7 +187,7 @@ def fetch_next_document(feed: Feed, api: Session) -> None:
             })
         except SessionError as e:
             log(f'SKRUNK: {e}')
-            return
+            return False
 
         if len(documents):
             doc = documents[0]
@@ -223,7 +227,7 @@ def fetch_next_document(feed: Feed, api: Session) -> None:
         ).strftime('%Y-%m-%d %H:%M:%S')
     else:
         log(f'ERROR: Cannot determine origin of feed {feed["id"]}')
-        return
+        return False
 
     try:
         if document_id:
@@ -231,7 +235,7 @@ def fetch_next_document(feed: Feed, api: Session) -> None:
 
             if document_body == document['body']:
                 # Body hasn't changed, so do nothing.
-                return
+                return False
 
             result = api.call('updateFeedDocument', {
                 'id': document_id,
@@ -241,22 +245,16 @@ def fetch_next_document(feed: Feed, api: Session) -> None:
             # We're creating a new document
             result = api.call('createFeedDocument', document)
 
-            if feed['notify']:
-                api.call('sendNotification', {
-                    'username': feed['creator'],
-                    'title': feed['name'],
-                    'body': 'A new post has been added to your feed.',
-                    'category': 'feed',
-                })
     except SessionError as e:
         log(f'SKRUNK: {e}')
-        return
+        return False
 
     if result['__typename'] != 'FeedDocument':
         log(f'SKRUNK: {result["message"]}')
-        return
+        return False
 
     log(f'{"Updated" if document_id else "Fetched new"} document for feed {feed["id"]}')
+    return True
 
 
 def main() -> None:
@@ -279,16 +277,40 @@ def main() -> None:
     API.reddit = praw.Reddit(config['reddit']['username'], check_for_async=False)
 
     log('Done.')
+    log('Polling feeds...')
+
     while True:
         for feed in get_feeds(api):
             # pylint: disable=broad-except
+            fetched_documents = 0
             try:
-                fetch_next_document(feed, api)
+                while fetch_next_document(feed, api):
+                    # Keep fetching documents until there are no more new ones.
+                    fetched_documents += 1
+                    time.sleep(API_DELAY)
             except Exception as e:
                 # We don't want one feed failure to kill the whole process.
                 # Log it and move on.
                 log(f'EXCEPTION: {e}')
-            # pylint: enable=broad-except
+
+            try:
+                if fetched_documents and feed['notify']:
+                    api.call('sendNotification', {
+                        'username': feed['creator'],
+                        'title': feed['name'],
+                        'body': (
+                            f'{"A" if fetched_documents == 1 else fetched_documents}' +
+                            f' new post{"" if fetched_documents == 1 else "s"}' +
+                            f' {"has" if fetched_documents == 1 else "have"}' +
+                            ' been added to your feed.'
+                        ),
+                        'category': 'feed',
+                    })
+            except Exception as e:
+                # We don't want one API call failure to kill the whole process.
+                # Log it and move on.
+                log(f'SKRUNK ERROR: {e}')
+        # pylint: enable=broad-except
 
         time.sleep(FETCH_DELAY)
 
