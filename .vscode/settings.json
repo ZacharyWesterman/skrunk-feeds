@@ -1,0 +1,24 @@
+{
+	"editor.formatOnSave": true,
+	"files.insertFinalNewline": true,
+	"python.analysis.inlayHints.variableTypes": true,
+	"python.analysis.inlayHints.functionReturnTypes": true,
+	"python.analysis.typeCheckingMode": "standard",
+	"editor.insertSpaces": false,
+	"autopep8.args": [
+		"--ignore=W191,E266",
+		"--max-line-length",
+		"256"
+	],
+	"pylint.args": [
+		"--disable=global-statement",
+		"--disable=redefined-builtin",
+		"--disable=too-many-arguments",
+		"--disable=too-many-positional-arguments"
+	],
+	"[python]": {
+		"editor.codeActionsOnSave": {
+			"source.organizeImports": "always"
+		}
+	}
+}
