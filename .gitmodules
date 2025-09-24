@@ -1,3 +1,3 @@
 [submodule "skrunk_api"]
 	path = skrunk_api
-	url = git@github.com:ZacharyWesterman/skrunk_api.git
+	url = https://github.com/ZacharyWesterman/skrunk_api.git
