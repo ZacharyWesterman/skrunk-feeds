@@ -279,8 +279,16 @@ def main() -> None:
     log('Done.')
     log('Polling feeds...')
 
+    def safe_get_feeds():
+        # pylint: disable=broad-except
+        try:
+            yield from get_feeds(api)
+        except Exception as e:
+            log(f'SKRUNK ERROR: {e}')
+        # pylint: enable=broad-except
+
     while True:
-        for feed in get_feeds(api):
+        for feed in safe_get_feeds():
             # pylint: disable=broad-except
             fetched_documents = 0
             try:
